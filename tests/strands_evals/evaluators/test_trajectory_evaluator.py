@@ -255,3 +255,51 @@ def test_trajectory_evaluator_update_trajectory_description():
     evaluator.update_trajectory_description(new_description)
 
     assert evaluator.trajectory_description == new_description
+
+
+def test_trajectory_evaluator_init_with_tools_merges_with_defaults():
+    """Test that custom tools are merged with the default scoring tools"""
+    from strands_evals.tools.evaluation_tools import (
+        any_order_match_scorer,
+        exact_match_scorer,
+        in_order_match_scorer,
+    )
+
+    def verify_step(step: str) -> str:
+        return "valid"
+
+    evaluator = TrajectoryEvaluator(rubric="Test rubric", tools=[verify_step])
+
+    assert evaluator._tools == [verify_step, exact_match_scorer, in_order_match_scorer, any_order_match_scorer]
+
+
+def test_trajectory_evaluator_init_without_tools_keeps_default_scorers():
+    """Test that default scoring tools are unchanged when no custom tools are provided"""
+    from strands_evals.tools.evaluation_tools import (
+        any_order_match_scorer,
+        exact_match_scorer,
+        in_order_match_scorer,
+    )
+
+    evaluator = TrajectoryEvaluator(rubric="Test rubric")
+
+    assert evaluator._tools == [exact_match_scorer, in_order_match_scorer, any_order_match_scorer]
+
+
+@patch("strands_evals.evaluators.trajectory_evaluator.Agent")
+def test_trajectory_evaluator_evaluate_passes_custom_tools_to_agent(mock_agent_class, evaluation_data, mock_agent):
+    """Test that merged tools (custom + defaults) reach the evaluator agent"""
+    mock_agent_class.return_value = mock_agent
+
+    def verify_step(step: str) -> str:
+        return "valid"
+
+    evaluator = TrajectoryEvaluator(rubric="Test rubric", tools=[verify_step])
+
+    result = evaluator.evaluate(evaluation_data)
+
+    mock_agent_class.assert_called_once_with(
+        model=None, system_prompt=evaluator.system_prompt, tools=evaluator._tools, callback_handler=None
+    )
+    assert verify_step in mock_agent_class.call_args[1]["tools"]
+    assert result[0].score == 0.9

@@ -259,3 +259,71 @@ async def test_output_evaluator_evaluate_async_includes_environment_state(mock_a
 
     assert len(result) == 1
     assert result[0].test_pass is True
+
+
+def test_output_evaluator_init_with_tools():
+    """Test OutputEvaluator initialization with custom tools"""
+
+    def verify_claim(claim: str) -> str:
+        return "verified"
+
+    evaluator = OutputEvaluator(rubric="Test rubric", tools=[verify_claim])
+
+    assert evaluator._tools == [verify_claim]
+
+
+def test_output_evaluator_init_without_tools_defaults_to_none():
+    """Test OutputEvaluator has no tools by default (current behavior preserved)"""
+    evaluator = OutputEvaluator(rubric="Test rubric")
+
+    assert evaluator._tools is None
+
+
+@patch("strands_evals.evaluators.output_evaluator.Agent")
+def test_output_evaluator_evaluate_passes_tools_to_agent(mock_agent_class, evaluation_data, mock_agent):
+    """Test that custom tools are passed to the evaluator agent"""
+    mock_agent_class.return_value = mock_agent
+
+    def verify_claim(claim: str) -> str:
+        return "verified"
+
+    evaluator = OutputEvaluator(rubric="Test rubric", tools=[verify_claim])
+
+    result = evaluator.evaluate(evaluation_data)
+
+    mock_agent_class.assert_called_once_with(
+        model=None, system_prompt=evaluator.system_prompt, callback_handler=None, tools=[verify_claim]
+    )
+    assert result[0].score == 0.8
+
+
+@patch("strands_evals.evaluators.output_evaluator.Agent")
+def test_output_evaluator_evaluate_without_tools_omits_tools_kwarg(mock_agent_class, evaluation_data, mock_agent):
+    """Test that no tools kwarg is passed when tools are not provided (backward compatible)"""
+    mock_agent_class.return_value = mock_agent
+    evaluator = OutputEvaluator(rubric="Test rubric")
+
+    evaluator.evaluate(evaluation_data)
+
+    mock_agent_class.assert_called_once_with(model=None, system_prompt=evaluator.system_prompt, callback_handler=None)
+
+
+@pytest.mark.asyncio
+@patch("strands_evals.evaluators.output_evaluator.Agent")
+async def test_output_evaluator_evaluate_async_passes_tools_to_agent(
+    mock_agent_class, evaluation_data, mock_async_agent
+):
+    """Test that custom tools are passed to the evaluator agent in async path"""
+    mock_agent_class.return_value = mock_async_agent
+
+    def verify_claim(claim: str) -> str:
+        return "verified"
+
+    evaluator = OutputEvaluator(rubric="Test rubric", tools=[verify_claim])
+
+    result = await evaluator.evaluate_async(evaluation_data)
+
+    mock_agent_class.assert_called_once_with(
+        model=None, system_prompt=evaluator.system_prompt, callback_handler=None, tools=[verify_claim]
+    )
+    assert result[0].score == 0.8

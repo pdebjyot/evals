@@ -23,6 +23,8 @@ class TrajectoryEvaluator(Evaluator[InputT, OutputT]):
         system_prompt: System prompt to guide model behavior.
                     If None, the evaluator will use one of the default template.
         include_inputs: Whether to include inputs to the task in the evaluation or not.
+        tools: Optional additional tools for the evaluator agent. Merged with the
+                    default trajectory scoring tools (exact/in-order/any-order match).
     """
 
     def __init__(
@@ -32,6 +34,7 @@ class TrajectoryEvaluator(Evaluator[InputT, OutputT]):
         model: Model | str | None = None,
         system_prompt: str = SYSTEM_PROMPT,
         include_inputs: bool = True,
+        tools: list[Any] | None = None,
         name: str | None = None,
     ):
         super().__init__(name=name)
@@ -39,7 +42,7 @@ class TrajectoryEvaluator(Evaluator[InputT, OutputT]):
         self.trajectory_description = trajectory_description
         self.model = model
         self.include_inputs = include_inputs
-        self._tools: list[str | dict[str, str] | Any] | None = [
+        self._tools: list[str | dict[str, str] | Any] | None = list(tools or []) + [
             exact_match_scorer,
             in_order_match_scorer,
             any_order_match_scorer,
