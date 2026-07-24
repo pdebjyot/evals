@@ -31,8 +31,8 @@ class OutputEvaluator(Evaluator[InputT, OutputT]):
         system_prompt: str = SYSTEM_PROMPT,
         include_inputs: bool = True,
         uses_environment_state: bool = False,
-        tools: list[Any] | None = None,
         name: str | None = None,
+        tools: list[Any] | None = None,
     ):
         super().__init__(name=name)
         self.rubric = rubric
@@ -40,7 +40,7 @@ class OutputEvaluator(Evaluator[InputT, OutputT]):
         self.include_inputs = include_inputs
         self.system_prompt = system_prompt
         self.uses_environment_state = uses_environment_state
-        self._tools = tools
+        self.tools = tools
 
     def _build_prompt(self, evaluation_case: EvaluationData[InputT, OutputT]) -> str | list:
         """Build the evaluation prompt for a test case.
@@ -70,17 +70,12 @@ class OutputEvaluator(Evaluator[InputT, OutputT]):
         Returns:
             The results of the evaluation as EvaluationOutput.
         """
-        evaluator_agent = self._create_evaluator_agent()
+        evaluator_agent = Agent(
+            model=self.model, tools=self.tools, system_prompt=self.system_prompt, callback_handler=None
+        )
         evaluation_prompt = self._build_prompt(evaluation_case)
         result = evaluator_agent(evaluation_prompt, structured_output_model=EvaluationOutput)
         return [cast(EvaluationOutput, result.structured_output)]
-
-    def _create_evaluator_agent(self) -> Agent:
-        """Create the judge agent, including custom tools when provided."""
-        kwargs: dict[str, Any] = {"model": self.model, "system_prompt": self.system_prompt, "callback_handler": None}
-        if self._tools:
-            kwargs["tools"] = self._tools
-        return Agent(**kwargs)
 
     async def evaluate_async(self, evaluation_case: EvaluationData[InputT, OutputT]) -> list[EvaluationOutput]:
         """
@@ -92,7 +87,9 @@ class OutputEvaluator(Evaluator[InputT, OutputT]):
         Returns:
             The results of the evaluation as EvaluationOutput.
         """
-        evaluator_agent = self._create_evaluator_agent()
+        evaluator_agent = Agent(
+            model=self.model, tools=self.tools, system_prompt=self.system_prompt, callback_handler=None
+        )
         evaluation_prompt = self._build_prompt(evaluation_case)
         result = await evaluator_agent.invoke_async(evaluation_prompt, structured_output_model=EvaluationOutput)
         return [cast(EvaluationOutput, result.structured_output)]

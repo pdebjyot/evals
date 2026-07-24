@@ -34,18 +34,19 @@ class TrajectoryEvaluator(Evaluator[InputT, OutputT]):
         model: Model | str | None = None,
         system_prompt: str = SYSTEM_PROMPT,
         include_inputs: bool = True,
-        tools: list[Any] | None = None,
         name: str | None = None,
+        tools: list[Any] | None = None,
     ):
         super().__init__(name=name)
         self.rubric = rubric
         self.trajectory_description = trajectory_description
         self.model = model
         self.include_inputs = include_inputs
-        self._tools: list[str | dict[str, str] | Any] | None = list(tools or []) + [
+        self._tools: list[str | dict[str, str] | Any] = [
             exact_match_scorer,
             in_order_match_scorer,
             any_order_match_scorer,
+            *(tools or []),
         ]
         self.system_prompt = system_prompt
 
