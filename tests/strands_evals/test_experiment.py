@@ -21,7 +21,6 @@ from strands_evals.evaluators import (
     ToolCalled,
     TrajectoryEvaluator,
 )
-from strands_evals.evaluators.evaluator import DEFAULT_BEDROCK_MODEL_ID
 from strands_evals.experiment import is_throttling_error
 from strands_evals.providers.trace_provider import TraceProvider
 from strands_evals.types import EvaluationData, EvaluationOutput
@@ -368,7 +367,7 @@ def test_experiment_to_dict_OutputEvaluator_default():
                 "metadata": None,
             }
         ],
-        "evaluators": [{"evaluator_type": "OutputEvaluator", "rubric": "rubric", "model_id": DEFAULT_BEDROCK_MODEL_ID}],
+        "evaluators": [{"evaluator_type": "OutputEvaluator", "rubric": "rubric"}],
     }
 
 
@@ -397,7 +396,6 @@ def test_experiment_to_dict_TrajectoryEvaluator_default():
             {
                 "evaluator_type": "TrajectoryEvaluator",
                 "rubric": "rubric",
-                "model_id": DEFAULT_BEDROCK_MODEL_ID,
             }
         ],
     }
@@ -460,7 +458,6 @@ def test_experiment_to_dict_InteractionsEvaluator_default():
             {
                 "evaluator_type": "InteractionsEvaluator",
                 "rubric": "rubric",
-                "model_id": DEFAULT_BEDROCK_MODEL_ID,
             }
         ],
     }
