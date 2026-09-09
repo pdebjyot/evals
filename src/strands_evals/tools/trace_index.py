@@ -38,7 +38,6 @@ Example::
 """
 
 import json
-import re
 
 from strands import tool
 
@@ -55,9 +54,7 @@ from ..types.trace import (
     ToolResultContent,
     UserMessage,
 )
-
-_PREVIEW_CHARS = 120
-_DEFAULT_MAX_READ_CHARS = 8_000
+from ._progressive import DEFAULT_MAX_READ_CHARS, paged_listing, preview, search_matches, window
 
 
 def _flatten_spans(session: Session) -> list[SpanUnion]:
@@ -150,11 +147,6 @@ def _search_haystack(span: SpanUnion) -> str:
     return str(span.model_dump())
 
 
-def _preview(text: str, limit: int = _PREVIEW_CHARS) -> str:
-    text = re.sub(r"\s+", " ", text).strip()
-    return text if len(text) <= limit else text[: limit - 3] + "..."
-
-
 def _describe(span: SpanUnion) -> str:
     """One overview line describing a span without its full payload."""
     if isinstance(span, ToolExecutionSpan):
@@ -162,22 +154,21 @@ def _describe(span: SpanUnion) -> str:
         result_size = len(str(span.tool_result.content))
         status = "ERROR" if span.tool_result.error else "ok"
         line = (
-            f"TOOL {span.tool_call.name}({_preview(args, 80)}) "
-            f"-> [{status}] result: {result_size} chars: {_preview(str(span.tool_result.content))}"
+            f"TOOL {span.tool_call.name}({preview(args, 80)}) "
+            f"-> [{status}] result: {result_size} chars: {preview(str(span.tool_result.content))}"
         )
         if span.tool_result.error:
-            line += f" | error: {_preview(str(span.tool_result.error), 80)}"
+            line += f" | error: {preview(str(span.tool_result.error), 80)}"
         return line
     if isinstance(span, AgentInvocationSpan):
         return (
-            f"AGENT prompt: {_preview(span.user_prompt, 80)} "
-            f"-> response: {len(span.agent_response)} chars: {_preview(span.agent_response)}"
+            f"AGENT prompt: {preview(span.user_prompt, 80)} "
+            f"-> response: {len(span.agent_response)} chars: {preview(span.agent_response)}"
         )
     if isinstance(span, InferenceSpan):
         rendered = [_render_message(m) for m in span.messages]
         size = sum(len(r) for r in rendered)
-        preview = _preview(" ".join(rendered))
-        return f"INFERENCE {len(span.messages)} messages, {size} chars: {preview}"
+        return f"INFERENCE {len(span.messages)} messages, {size} chars: {preview(' '.join(rendered))}"
     return f"{type(span).__name__}"
 
 
@@ -191,7 +182,7 @@ class TraceIndex:
             content is windowed and the tool reports how to page through it.
     """
 
-    def __init__(self, session: Session, max_read_chars: int = _DEFAULT_MAX_READ_CHARS):
+    def __init__(self, session: Session, max_read_chars: int = DEFAULT_MAX_READ_CHARS):
         if max_read_chars < 1:
             raise ValueError(f"max_read_chars must be >= 1, got {max_read_chars}")
         self.session = session
@@ -229,7 +220,7 @@ class TraceIndex:
             """
             if not 0 <= index < len(this._spans):
                 return f"ERROR: index {index} out of range (0..{len(this._spans) - 1})"
-            return this._window(_span_text(this._spans[index]), offset)
+            return window(_span_text(this._spans[index]), offset, this.max_read_chars)
 
         @tool
         def search_spans(pattern: str, max_matches: int = 20, is_regex: bool = False) -> str:
@@ -245,59 +236,16 @@ class TraceIndex:
                     also capped at max_read_chars total, whichever comes first.
                 is_regex: Set True to treat pattern as a regular expression.
             """
-            if is_regex:
-                try:
-                    # MULTILINE so ^/$ anchor to line boundaries in the newline-joined
-                    # haystack — LLMs write anchored regexes and would otherwise read a
-                    # silent "No matches" as "claim unsupported".
-                    rx = re.compile(pattern, re.IGNORECASE | re.MULTILINE)
-                except re.error as exc:
-                    return f"ERROR: invalid regex {pattern!r}: {exc}. Retry with is_regex=False for a literal search."
-                matcher = lambda text: [(m.start(), m.end()) for m in rx.finditer(text)]  # noqa: E731
-            else:
-                needle = pattern.lower()
-
-                def matcher(text: str) -> list[tuple[int, int]]:
-                    spans, low, start = [], text.lower(), 0
-                    while (i := low.find(needle, start)) != -1:
-                        spans.append((i, i + len(needle)))
-                        start = i + max(len(needle), 1)
-                    return spans
-
-            hits: list[str] = []
-            stop_reason: str | None = None
-            used = 0
-            for i, span in enumerate(this._spans):
-                if len(hits) >= max_matches:
-                    stop_reason = "max_matches"
-                    break
-                text = _search_haystack(span)
-                positions = matcher(text)
-                if not positions:
-                    continue
-                s, e = positions[0]
-                excerpt = _preview(text[max(0, s - 60) : e + 60], 160)
-                count = len(positions)
-                suffix = f" ({count} matches)" if count > 1 else ""
-                line = f"[{i}]{suffix} ...{excerpt}..."
-                # Bound the whole response by max_read_chars, not max_matches alone:
-                # a generous max_matches on a long trace would otherwise blow past the
-                # per-call budget every other tool honors. Always keep at least one hit.
-                if hits and used + len(line) + 1 > this.max_read_chars:
-                    stop_reason = "budget"
-                    break
-                hits.append(line)
-                used += len(line) + 1
-            if not hits:
-                return f"No matches for {pattern!r}"
-            if stop_reason == "max_matches":
-                hits.append(f"[stopped at {max_matches} spans; refine the pattern or raise max_matches for more]")
-            elif stop_reason == "budget":
-                hits.append(
-                    f"[budget reached at {this.max_read_chars} chars ({len(hits)} spans shown); "
-                    f"refine the pattern to narrow results]"
-                )
-            return "\n".join(hits)
+            return search_matches(
+                len(this._spans),
+                lambda i: _search_haystack(this._spans[i]),
+                str,
+                pattern,
+                max_matches,
+                is_regex,
+                this.max_read_chars,
+                unit_pl="spans",
+            )
 
         self.tools = [list_spans, get_span, search_spans]
 
@@ -309,30 +257,19 @@ class TraceIndex:
                 `max_read_chars`; if it doesn't fit, the response says the next offset.
         """
         total = len(self._spans)
-        if offset < 0:
-            return f"ERROR: offset {offset} is negative; use offset >= 0"
-        if total and offset >= total:
-            return f"ERROR: offset {offset} beyond last span index {total - 1}"
-
         header = (
             f"Trace overview: {total} spans (session {self.session.session_id}). "
             f"Previews are truncated; call get_span/search_spans to load full content "
             f"(up to {self.max_read_chars} chars per call) and verify claims before scoring."
         )
-        lines: list[str] = []
-        used, end = len(header), offset
-        for i in range(offset, total):
-            line = self._describe_lines[i]
-            if lines and used + len(line) + 1 > self.max_read_chars:
-                break
-            lines.append(line)
-            used += len(line) + 1
-            end = i + 1
-        shown = f"Showing spans {offset}-{end - 1} of {total}." if lines else f"0 spans (of {total})."
-        parts = [header, shown, *lines]
-        if end < total:
-            parts.append(f"[MORE: {total - end} spans remain; call again with offset={end}]")
-        return "\n".join(parts)
+        return paged_listing(
+            header,
+            self._describe_lines,
+            offset,
+            self.max_read_chars,
+            unit_sg="span",
+            unit_pl="spans",
+        )
 
     def for_judge(self) -> tuple[str, list]:
         """Return the two pieces a judge needs, together, so neither is forgotten.
@@ -354,14 +291,3 @@ class TraceIndex:
         """
         prompt_section = f"<TraceOverview>\n{self.overview()}\n</TraceOverview>"
         return prompt_section, self.tools
-
-    def _window(self, text: str, offset: int) -> str:
-        if offset < 0:
-            return f"ERROR: offset {offset} is negative; use offset >= 0"
-        if offset >= len(text):
-            return f"ERROR: offset {offset} beyond content length {len(text)}"
-        window = text[offset : offset + self.max_read_chars]
-        if offset + len(window) < len(text):
-            remaining = len(text) - offset - len(window)
-            window += f"\n[TRUNCATED: {remaining} chars remain; call again with offset={offset + len(window)}]"
-        return window
