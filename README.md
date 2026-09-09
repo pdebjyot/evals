@@ -241,6 +241,35 @@ off the previews alone.
 > `actual_trajectory` unconditionally and would re-create the overflow this pattern
 > exists to prevent.
 
+#### Large reference knowledge with `KnowledgeIndex`
+
+Some rubrics need the judge to check the trace against knowledge that lives
+**outside** it — the catalog of tools/skills the agent could have used, API
+specs, or policy documents. That corpus overflows the judge for the same reason a
+large trace does, and the `Session` can't answer capability questions (it only
+holds what a run *actually invoked*). `KnowledgeIndex` gives the same list / get /
+search treatment to any keyed corpus, in two modes:
+
+```python
+from strands_evals.tools.knowledge_index import KnowledgeIndex
+
+index = KnowledgeIndex(tool_catalog)  # {key: document text}, e.g. tool schemas by name
+
+# --- Mode A: retrieve-then-inject (default; deterministic, one LLM call) ---
+# The metric selects the trace-relevant keys and injects only that bounded slice.
+knowledge_block = index.render(keys=plan_tool_names)   # a <Knowledge> block
+judged_output = f"{agent_answer}\n{knowledge_block}"
+
+# --- Mode B: agentic discovery (reserve for open-ended lookup) ---
+# When the needed entry can't be predetermined ("does *any* tool cover this?").
+prompt_section, tools = index.for_judge()              # overview + list/get/search
+```
+
+Use **Mode A** whenever the relevant keys are derivable from the trace (the tools
+the plan called, the domains it touched) — it's one call and deterministic. Reach
+for **Mode B** only when the lookup is genuinely open-ended. Both honor the same
+`max_read_chars` bound and case-insensitive literal-or-regex search as `TraceIndex`.
+
 ### Trace-based Helpfulness Evaluation
 
 Evaluate agent helpfulness using OpenTelemetry traces with seven-level scoring:
